@@ -277,6 +277,35 @@ proxies:
     {{- if ne (default "" $proxy.XhttpMode) "" }}
     mode: {{ $proxy.XhttpMode }}
     {{- end }}
+    {{- if ne (default "" $proxy.XhttpExtra) "" }}
+    {{- $extra := fromJson $proxy.XhttpExtra }}
+    {{- if $extra.downloadSettings }}
+    {{- $ds := $extra.downloadSettings }}
+    download-settings:
+      server: {{ $ds.address | quote }}
+      port: {{ $ds.port }}
+      network: {{ default "xhttp" $ds.network }}
+      tls: true
+      {{- if $ds.tlsSettings }}
+      servername: {{ $ds.tlsSettings.serverName | quote }}
+      alpn: {{ $ds.tlsSettings.alpn | toJson }}
+      client-fingerprint: {{ default "chrome" $ds.tlsSettings.fingerprint }}
+      {{- end }}
+      {{- if $ds.realitySettings }}
+      servername: {{ default "" $ds.realitySettings.serverName | quote }}
+      client-fingerprint: {{ default "chrome" $ds.realitySettings.fingerprint }}
+      reality-opts:
+        public-key: {{ $ds.realitySettings.publicKey | quote }}
+        short-id: {{ default "" $ds.realitySettings.shortId | quote }}
+      {{- end }}
+      {{- if $ds.xhttpSettings }}
+      xhttp-opts:
+        host: {{ $ds.xhttpSettings.host | quote }}
+        path: {{ $ds.xhttpSettings.path | quote }}
+        mode: {{ default "auto" $ds.xhttpSettings.mode }}
+      {{- end }}
+    {{- end }}
+    {{- end }}
   {{- else if eq $proxy.Transport "grpc" }}
   network: grpc
   grpc-opts:
