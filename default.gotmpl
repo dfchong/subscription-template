@@ -260,6 +260,25 @@ vmess://{{ $vmessDict | toJson | b64enc }}
   {{- if hasKey $buildTransportParams "extra" -}}
     {{- $params = append $params (printf "extra=%s" (index $buildTransportParams "extra")) -}}
   {{- end -}}
+  {{- /* Shadowrocket xhttp 下行分离参数，合并进 obfsParam */ -}}
+  {{- if and (eq $transport "xhttp") (ne (default "" $proxy.XhttpExtra) "") -}}
+    {{- $extra := fromJson $proxy.XhttpExtra -}}
+    {{- if $extra.downloadSettings -}}
+      {{- $ds := $extra.downloadSettings -}}
+      {{- $dlHost := default "" $ds.address -}}
+      {{- $dlPort := printf "%v" $ds.port -}}
+      {{- $dlSNI := "" -}}
+      {{- if $ds.realitySettings -}}
+        {{- $dlSNI = default "" $ds.realitySettings.serverName -}}
+      {{- else if $ds.tlsSettings -}}
+        {{- $dlSNI = default "" $ds.tlsSettings.serverName -}}
+      {{- end -}}
+      {{- if and (ne $dlHost "") (ne $dlPort "") (ne $dlSNI "") -}}
+        {{- $obfsParamVal := printf "{\"\":{\"downloadTargetHost\":\"%s\",\"downloadTargetPort\":\"%s\",\"downloadServerName\":\"%s\"},\"Host\":\"%s\"}" $dlHost $dlPort $dlSNI (default "" $proxy.Host) -}}
+        {{- $params = append $params (printf "obfsParam=%s" (urlquery $obfsParamVal)) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
   {{- /* 5. Common 通用参数 */ -}}
   {{- $params = append $params $common }}
 vless://{{ $password }}@{{ $server }}:{{ $proxy.Port }}?{{ join "&" $params }}#{{ $proxy.Name }}
