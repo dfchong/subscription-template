@@ -1,0 +1,141 @@
+{{- $GiB := 1073741824.0 -}}
+{{- $used := printf "%.2f" (divf (add (.UserInfo.Download | default 0 | float64) (.UserInfo.Upload | default 0 | float64)) $GiB) -}}
+{{- $traffic := (.UserInfo.Traffic | default 0 | float64) -}}
+{{- $total := printf "%.2f" (divf $traffic $GiB) -}}
+
+{{- $ExpiredAt := "" -}}
+{{- $expStr := printf "%v" .UserInfo.ExpiredAt -}}
+{{- if regexMatch `^[0-9]+$` $expStr -}}
+  {{- $ts := $expStr | float64 -}}
+  {{- $sec := ternary (divf $ts 1000.0) $ts (ge (len $expStr) 13) -}}
+  {{- $ExpiredAt = (date "2006-01-02 15:04:05" (unixEpoch ($sec | int64))) -}}
+{{- else -}}
+  {{- $ExpiredAt = $expStr -}}
+{{- end -}}
+
+{{- $sortFields := list "Sort" "Port" "Name" -}}
+{{- $sortConfig := dict "Sort" "asc" "Port" "asc" "Name" "asc" -}}
+{{- $byKey := dict -}}
+{{- range $p := .Proxies -}}
+  {{- $keyParts := list -}}
+  {{- range $field := $sortFields -}}
+    {{- $order := index $sortConfig $field -}}
+    {{- $val := default "" (printf "%v" (index $p $field)) -}}
+    {{- if or (eq $field "Sort") (eq $field "Port") -}}
+      {{- $val = printf "%08d" (int (default 0 (index $p $field))) -}}
+    {{- end -}}
+    {{- if eq $order "desc" -}}
+      {{- $val = printf "~%s" $val -}}
+    {{- end -}}
+    {{- $keyParts = append $keyParts $val -}}
+  {{- end -}}
+  {{- $_ := set $byKey (join "|" $keyParts) $p -}}
+{{- end -}}
+{{- $sorted := list -}}
+{{- range $k := sortAlpha (keys $byKey) -}}
+  {{- $sorted = append $sorted (index $byKey $k) -}}
+{{- end -}}
+
+{{- $supportSet := dict "shadowsocks" true "vmess" true "vless" true "trojan" true "hysteria2" true "hysteria" true "tuic" true -}}
+{{- $supportedProxies := list -}}
+{{- range $proxy := $sorted -}}
+  {{- if hasKey $supportSet $proxy.Type -}}
+    {{- $supportedProxies = append $supportedProxies $proxy -}}
+  {{- end -}}
+{{- end -}}
+
+{{- /* 🌟 创建用于保存最终订阅流的变量缓冲区 */ -}}
+{{- $rawLinks := "" -}}
+
+{{- range $proxy := $supportedProxies }}
+  {{- $common := "udp=1&tfo=1" -}}
+  {{- $server := $proxy.Server -}}
+  {{- if and (contains $server ":") (not (hasPrefix "[" $server)) -}}
+    {{- $server = printf "[%s]" $server -}}
+  {{- end -}}
+  {{- $password := $.UserInfo.Password -}}
+  {{- $SkipVerify := $proxy.AllowInsecure -}}
+
+  {{- $buildTransportParams := dict -}}
+  {{- $transport := default "tcp" $proxy.Transport -}}
+  {{- if ne $transport "" -}}
+    {{- $_ := set $buildTransportParams "type" (ternary "ws" $transport (eq $transport "websocket")) -}}
+  {{- end -}}
+  {{- if and (or (eq $transport "ws") (eq $transport "websocket") (eq $transport "httpupgrade")) (ne (default "" $proxy.Path) "") -}}
+    {{- $_ := set $buildTransportParams "path" ($proxy.Path | urlquery) -}}
+  {{- end -}}
+  {{- if and (or (eq $transport "ws") (eq $transport "websocket") (eq $transport "httpupgrade")) (ne (default "" $proxy.Host) "") -}}
+    {{- $_ := set $buildTransportParams "host" $proxy.Host -}}
+  {{- end -}}
+  {{- if and (eq $transport "grpc") (ne (default "" $proxy.ServiceName) "") -}}
+    {{- $_ := set $buildTransportParams "serviceName" $proxy.ServiceName -}}
+  {{- end -}}
+
+  {{- $buildSecurityParams := dict -}}
+  {{- if or (eq $proxy.Security "tls") (eq $proxy.Security "reality") -}}
+    {{- $_ := set $buildSecurityParams "security" $proxy.Security -}}
+  {{- end -}}
+  {{- if ne (default "" $proxy.SNI) "" -}}
+    {{- $_ := set $buildSecurityParams "sni" $proxy.SNI -}}
+  {{- end -}}
+  {{- if $SkipVerify -}}
+    {{- $_ := set $buildSecurityParams "allowInsecure" "1" -}}
+  {{- end -}}
+  {{- if ne (default "" $proxy.Fingerprint) "" -}}
+    {{- $_ := set $buildSecurityParams "fp" $proxy.Fingerprint -}}
+  {{- end -}}
+  {{- if and (eq $proxy.Security "reality") (ne (default "" $proxy.RealityPublicKey) "") -}}
+    {{- $_ := set $buildSecurityParams "pbk" $proxy.RealityPublicKey -}}
+  {{- end -}}
+  {{- if and (eq $proxy.Security "reality") (ne (default "" $proxy.RealityShortId) "") -}}
+    {{- $_ := set $buildSecurityParams "sid" $proxy.RealityShortId -}}
+  {{- end -}}
+
+  {{- $link := "" -}}
+  
+  {{- if eq $proxy.Type "vless" }}
+    {{- $params := list -}}
+    {{- $params = append $params "encryption=none" -}}
+    {{- if and (ne (default "" $proxy.Flow) "") (ne $proxy.Flow "none") -}}
+      {{- $params = append $params (printf "flow=%s" $proxy.Flow) -}}
+    {{- end -}}
+    {{- range $key, $val := $buildSecurityParams -}}{{ $params = append $params (printf "%s=%s" $key $val) }}{{- end -}}
+    {{- range $key, $val := $buildTransportParams -}}{{ $params = append $params (printf "%s=%s" $key $val) }}{{- end -}}
+    {{- $params = append $params $common -}}
+    {{- $link = printf "vless://%s@%s:%d?%s#%s\n" $password $server $proxy.Port (join "&" $params) ($proxy.Name | urlquery) -}}
+    
+  {{- else if eq $proxy.Type "vmess" }}
+    {{- $vmessDict := dict "v" "2" "ps" $proxy.Name "add" $proxy.Server "port" $proxy.Port "id" $password "aid" 0 "net" "tcp" "type" "none" "tls" "" -}}
+    {{- if eq $transport "ws" -}}
+      {{- $_ := set $vmessDict "net" "ws" -}}
+      {{- if $proxy.Path }}{{ $_ := set $vmessDict "path" $proxy.Path }}{{ end -}}
+      {{- if $proxy.Host }}{{ $_ := set $vmessDict "host" $proxy.Host }}{{ end -}}
+    {{- end -}}
+    {{- if eq $proxy.Security "tls" -}}{{ $_ := set $vmessDict "tls" "tls" }}{{- end -}}
+    {{- $link = printf "vmess://%s\n" ($vmessDict | toJson | b64enc) -}}
+    
+  {{- else if eq $proxy.Type "trojan" }}
+    {{- $params := list -}}
+    {{- range $key, $val := $buildSecurityParams -}}{{ $params = append $params (printf "%s=%s" $key $val) }}{{- end -}}
+    {{- range $key, $val := $buildTransportParams -}}{{ $params = append $params (printf "%s=%s" $key $val) }}{{- end -}}
+    {{- $params = append $params $common -}}
+    {{- $link = printf "trojan://%s@%s:%d?%s#%s\n" $password $server $proxy.Port (join "&" $params) ($proxy.Name | urlquery) -}}
+    
+  {{- else if or (eq $proxy.Type "hysteria2") (eq $proxy.Type "hy2") }}
+    {{- $params := list -}}
+    {{- if $proxy.SNI -}}{{ $params = append $params (printf "sni=%s" $proxy.SNI) }}{{- end -}}
+    {{- if $SkipVerify -}}{{ $params = append $params "insecure=1" }}{{- end -}}
+    {{- $link = printf "hysteria2://%s@%s:%d?%s#%s\n" $password $server $proxy.Port (join "&" (append $params $common)) ($proxy.Name | urlquery) -}}
+    
+  {{- else if eq $proxy.Type "shadowsocks" }}
+    {{- $params := list -}}
+    {{- range $key, $val := $buildSecurityParams -}}{{ $params = append $params (printf "%s=%s" $key $val) }}{{- end -}}
+    {{- $params = append $params $common -}}
+    {{- $link = printf "ss://%s@%s:%d?%s#%s\n" (printf "%s:%s" (default "aes-128-gcm" $proxy.Method) $password | b64enc) $server $proxy.Port (join "&" $params) ($proxy.Name | urlquery) -}}
+  {{- end }}
+
+  {{- $rawLinks = printf "%s%s" $rawLinks $link -}}
+{{- end }}
+
+{{- /* 🌟 核心魔法：将明文节点流全部进行 Base64 编码输出，绝不给 v2rayN 误判成 YAML 的机会 */ -}}
+{{- $rawLinks | b64enc -}}
