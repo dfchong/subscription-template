@@ -110,7 +110,7 @@
 {{- $svc := $proxy.ServiceName }}
 
 {{- $tlsOpts := "" -}}
-{{- if or $sni $proxy.AllowInsecure $proxy.Fingerprint -}}
+{{- if or $sni $proxy.AllowInsecure $proxy.Fingerprint $proxy.RealityPublicKey -}}
   {{- $tlsOpts = "\"tls\": {\"enabled\": true" -}}
   {{- if $sni -}}
     {{- $tlsOpts = printf "%s, \"server_name\": \"%s\"" $tlsOpts $sni -}}
@@ -120,6 +120,13 @@
   {{- end -}}
   {{- if $proxy.Fingerprint -}}
     {{- $tlsOpts = printf "%s, \"utls\": {\"enabled\": true, \"fingerprint\": \"%s\"}" $tlsOpts ($proxy.Fingerprint) -}}
+  {{- end -}}
+  {{- if $proxy.RealityPublicKey -}}
+    {{- $tlsOpts = printf "%s, \"reality\": {\"enabled\": true, \"public_key\": \"%s\"" $tlsOpts $proxy.RealityPublicKey -}}
+    {{- if $proxy.RealityShortId -}}
+      {{- $tlsOpts = printf "%s, \"short_id\": \"%s\"" $tlsOpts $proxy.RealityShortId -}}
+    {{- end -}}
+    {{- $tlsOpts = printf "%s}" $tlsOpts -}}
   {{- end -}}
   {{- $tlsOpts = printf "%s}" $tlsOpts -}}
 {{- end -}}
@@ -151,7 +158,7 @@
 { "type": "trojan", "tag": "{{ $name }}", "server": "{{ $server }}", "server_port": {{ $port }}, "password": "{{ $pwd }}"{{ if $transportOpts }}, {{ $transportOpts }}{{ end }}, {{ $tlsOpts }} }
 
 {{- else if eq $proxy.Type "vless" -}}
-{ "type": "vless", "tag": "{{ $name }}", "server": "{{ $server }}", "server_port": {{ $port }}, "uuid": "{{ $pwd }}"{{ if $transportOpts }}, {{ $transportOpts }}{{ end }}{{ if $tlsOpts }}, {{ $tlsOpts }}{{ end }} }
+{ "type": "vless", "tag": "{{ $name }}", "server": "{{ $server }}", "server_port": {{ $port }}, "uuid": "{{ $pwd }}"{{ if $transportOpts }}, {{ $transportOpts }}{{ end }}{{ if $proxy.Flow }}, "flow": "{{ $proxy.Flow }}"{{ end }}{{ if $tlsOpts }}, {{ $tlsOpts }}{{ end }} }
 
 {{- else if eq $proxy.Type "vmess" -}}
 { "type": "vmess", "tag": "{{ $name }}", "server": "{{ $server }}", "server_port": {{ $port }}, "uuid": "{{ $pwd }}", "security": "auto"{{ if $transportOpts }}, {{ $transportOpts }}{{ end }}{{ if $tlsOpts }}, {{ $tlsOpts }}{{ end }} }
